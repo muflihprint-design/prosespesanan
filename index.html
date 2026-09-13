@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel | VI PRINTING</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         body {
@@ -105,12 +106,14 @@
     </main>
 
     <script>
-        // Konfigurasi Database (Sama dengan aplikasi pelanggan)
         const SUPABASE_URL = "https://zqxeoveanevsvynptckm.supabase.co";
-        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpxeGVvdmVhbmV2c3Z5bnB0Y2ttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNzUzODEsImV4cCI6MjA4OTg1MTM4MX0.eeIaytpW1wtWPJc2FbhufkDkhONUt9yypTZU4dTVmsM";
-        
-        let allOrders = [];
-        let currentFilter = 'Semua';
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpxeGVvdmVhbmV2c3Z5bnB0Y2ttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNzUzODEsImV4cCI6MjA4OTg1MTM4MX0.eeIaytpW1wtWPJc2FbhufkDkhONUt9yypTZU4dTVmsM";
+
+// Inisialisasi Supabase Client
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let allOrders = [];
+let currentFilter = 'Semua';
 
         // Pilihan Status yang diperbolehkan
         const STATUS_OPTIONS = [
@@ -173,32 +176,58 @@
             return "bg-slate-100 text-slate-800 border-slate-200";
         }
 
-        async function loadOrders() {
-            document.getElementById('loading-state').classList.remove('hidden');
-            document.getElementById('orders-container').classList.add('hidden');
-            document.getElementById('empty-state').classList.add('hidden');
-            
-            try {
-                // Tarik semua data dari tabel pesanan diurutkan dari yang terbaru
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/pesanan?select=*&order=tanggal.desc`, {
-                    headers: {
-                        "apikey": SUPABASE_KEY,
-                        "Authorization": `Bearer ${SUPABASE_KEY}`
-                    }
-                });
-
-                if (!response.ok) throw new Error("Gagal terhubung ke database.");
-                
-                allOrders = await response.json();
-                updateStatistics();
-                applyFilter();
-                
-            } catch (error) {
-                console.error(error);
-                showToast('Gagal memuat data pesanan. Periksa koneksi internet.', 'error');
-                document.getElementById('loading-state').classList.add('hidden');
+        async function loadOrders(isSilentUpdate = false) {
+    if (!isSilentUpdate) {
+        document.getElementById('loading-state').classList.remove('hidden');
+        document.getElementById('orders-container').classList.add('hidden');
+        document.getElementById('empty-state').classList.add('hidden');
+    }
+    
+    try {
+        // Tetap menggunakan fetch REST API Anda yang sudah ada untuk memuat data awal
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/pesanan?select=*&order=tanggal.desc`, {
+            headers: {
+                "apikey": SUPABASE_KEY,
+                "Authorization": `Bearer ${SUPABASE_KEY}`
             }
-        }
+        });
+
+        if (!response.ok) throw new Error("Gagal terhubung ke database.");
+        allOrders = await response.json();
+        updateStatistics();
+        applyFilter();
+        
+    } catch (error) {
+        console.error(error);
+        if (!isSilentUpdate) showToast('Gagal memuat data pesanan.', 'error');
+        document.getElementById('loading-state').classList.add('hidden');
+    }
+}
+
+// FUNGSI BARU: Mendengarkan perubahan Realtime
+function initializeRealtime() {
+    supabase
+        .channel('pembaruan-pesanan')
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'pesanan' },
+            (payload) => {
+                console.log('Perubahan terdeteksi:', payload);
+                // Tarik ulang data secara diam-diam agar tabel langsung ter-update
+                loadOrders(true); 
+                
+                // Opsional: Tampilkan notifikasi jika ada pesanan baru
+                if (payload.eventType === 'INSERT') {
+                    showToast('Pesanan baru saja masuk!', 'success');
+                }
+            }
+        )
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                console.log('Terhubung ke Supabase Realtime');
+            }
+        });
+}
 
         function updateStatistics() {
             document.getElementById('stat-total').innerText = allOrders.length;
@@ -392,7 +421,10 @@
         }
 
         // Jalankan saat halaman dibuka
-        window.onload = loadOrders;
+        window.onload = () => {
+    loadOrders();
+    initializeRealtime();
+};
 
     </script>
 </body>
